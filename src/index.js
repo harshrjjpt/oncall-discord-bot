@@ -2,7 +2,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
-const knex = require('./db');
+const db = require('./services/database');
 const cron = require('node-cron');
 const { findBestMatch } = require('./services/matcher');
 const winston = require('winston');
@@ -20,7 +20,7 @@ if (!TOKEN) {
 }
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
 client.commands = new Collection();
@@ -33,8 +33,17 @@ for (const file of fs.readdirSync(commandsPath)) {
   if (cmd.data && cmd.execute) client.commands.set(cmd.data.name, cmd);
 }
 
-client.once('ready', () => {
+client.once('ready', async () => {
   logger.info(`Logged in as ${client.user.tag}`);
+  
+  // Initialize database with sample data if needed
+  try {
+    await db.initializeDatabase();
+    logger.info('Database initialized successfully');
+  } catch (error) {
+    logger.error('Failed to initialize database:', error);
+  }
+  
   scheduleDailyOncall();
 });
 
@@ -66,26 +75,26 @@ async function scheduleDailyOncall() {
   cron.schedule(cronExpr, async () => {
     logger.info('Running daily on-call check');
     try {
-      const weekday = new Date().toLocaleString('en-US', { weekday: 'long', timeZone: 'Asia/Kolkata' }).toLowerCase();
-      const oncall = await knex('developers').whereRaw('lower(oncall_days) like ?', [`%${weekday}%`]).first();
+      const oncallDevelopers = await db.getOncallDevelopers();
+      const oncall = oncallDevelopers[0]; // Get the first on-call developer
       if (oncall) {
         // Find a place to notify: for simplicity, notify a channel named #oncall if present
         for (const guild of client.guilds.cache.values()) {
           const channel = guild.channels.cache.find(c => c.name === 'oncall' && c.isTextBased && c.permissionsFor(guild.members.me).has('SendMessages'));
           const mention = `<@${oncall.discord_id}>`;
-          const msg = `📢 Daily on-call reminder: ${oncall.name} (${mention}) is on-call today (${weekday}).`;
+          const msg = `📢 Daily on-call reminder: ${oncall.name} (${mention}) is currently on-call.`;
           if (channel) {
             channel.send(msg).catch(err => logger.warn('Failed to send daily oncall message', err));
           } else {
             // fallback: try to DM the oncall
-            client.users.fetch(oncall.discord_id).then(u => u.send(`You are on-call today (${weekday}).`)).catch(() => {});
+            client.users.fetch(oncall.discord_id).then(u => u.send(`You are currently on-call.`)).catch(() => {});
           }
         }
       } else {
         // No oncall -> notify admins/channel about this
         for (const guild of client.guilds.cache.values()) {
           const channel = guild.channels.cache.find(c => c.name === 'oncall' && c.isTextBased);
-          if (channel) channel.send(`⚠ No one is on-call today (${weekday}). Please assign someone.`).catch(() => {});
+          if (channel) channel.send(`⚠ No one is currently on-call. Please assign someone.`).catch(() => {});
         }
       }
     } catch (err) {

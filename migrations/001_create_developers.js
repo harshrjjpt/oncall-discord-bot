@@ -4,7 +4,7 @@
  * - name
  * - discord_id
  * - skills (string comma-separated)
- * - oncall_days (string comma-separated: monday,tuesday)
+ * - is_oncall (boolean)
  * - created_at
  */
 exports.up = function(knex) {
@@ -13,7 +13,7 @@ exports.up = function(knex) {
       table.string('name').notNullable();
       table.string('discord_id').notNullable();
       table.text('skills').defaultTo('');
-      table.text('oncall_days').defaultTo(''); // comma-separated weekdays
+      table.boolean('is_oncall').defaultTo(false);
       table.timestamp('created_at').defaultTo(knex.fn.now());
     });
   };
